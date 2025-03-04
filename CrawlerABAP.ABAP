@@ -7,6 +7,7 @@ REPORT zcar_crawler.
 
 PARAMETERS: p_prog TYPE progname.
 PARAMETERS: p_clas TYPE progname.
+PARAMETERS: p_func TYPE progname.
 
 TYPE-POOLS: seoc,
             seop.
@@ -32,7 +33,8 @@ CLASS lcl_crawler DEFINITION.
 
 
     METHODS: constructor          IMPORTING iv_prog TYPE progname
-                                            iv_clas TYPE progname.
+                                            iv_clas TYPE progname
+                                            iv_func TYPE progname.
     METHODS: start_crawler_prog   CHANGING  cs_object TYPE ty_dependency.
     METHODS: start_crawler_class  CHANGING  cs_object TYPE ty_dependency.
     METHODS: start_crawler_funct  CHANGING  cs_object TYPE ty_dependency.
@@ -69,6 +71,12 @@ CLASS lcl_crawler IMPLEMENTATION.
       start_crawler_class( CHANGING cs_object = ls_objects ).
     ENDIF.
 
+    IF iv_func IS NOT INITIAL.
+      ls_objects-object = iv_clas.
+      ls_objects-obj_type = 'FUNCTION'.
+      start_crawler_funct( CHANGING cs_object = ls_objects ).
+    ENDIF.
+
     APPEND ls_objects TO gt_objects.
 
     display_dependencies( ).
@@ -95,7 +103,7 @@ CLASS lcl_crawler IMPLEMENTATION.
       add_program( EXPORTING is_source = ls_source
                    CHANGING  cs_object = cs_object ).
 
-      " Se Tiver Classes Adiciona
+      " Se Tiver Programas Adiciona
       add_class( EXPORTING is_source = ls_source
                  CHANGING  cs_object = cs_object ).
 
@@ -247,7 +255,7 @@ CLASS lcl_crawler IMPLEMENTATION.
 
       CHECK ls_source IS NOT INITIAL.
 
-      " Se Tiver Classes Adiciona
+      " Se Tiver Programas Adiciona
       add_program( EXPORTING is_source = ls_source
                    CHANGING  cs_object = cs_object ).
 
@@ -266,6 +274,24 @@ CLASS lcl_crawler IMPLEMENTATION.
   METHOD start_crawler_funct.
 
     CREATE DATA cs_object-dependencies TYPE TABLE OF ty_dependency.
+
+    LOOP AT cs_object-source INTO DATA(ls_source).
+
+      CHECK ls_source IS NOT INITIAL.
+
+      " Se Tiver Programas Adiciona
+      add_program( EXPORTING is_source = ls_source
+                   CHANGING  cs_object = cs_object ).
+
+      " Se Tiver Classes Adiciona
+      add_class( EXPORTING is_source = ls_source
+                 CHANGING  cs_object = cs_object ).
+
+      " Se Tiver Funções Adiciona
+      add_function( EXPORTING is_source = ls_source
+                    CHANGING  cs_object = cs_object ).
+
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -336,6 +362,17 @@ CLASS lcl_crawler IMPLEMENTATION.
       REPLACE ALL OCCURRENCES OF ',' IN lv_name_object WITH ''.
       TRANSLATE lv_name_object TO UPPER CASE.
 
+      SELECT SINGLE object
+        FROM tadir
+        WHERE obj_name = @lv_name_object
+          AND object   = 'PROG'
+        INTO @DATA(lv_tadir).
+
+      IF ( lv_name_object(1) <> 'Y' AND lv_name_object(1) <> 'Z' ) OR lv_tadir IS INITIAL.
+        RETURN.
+      ENDIF.
+      CLEAR: lv_tadir.
+
       " >>> Inicia o Objeto
       ls_dependency-object   = lv_name_object.
       ls_dependency-obj_type = 'PROGRAM'.
@@ -369,9 +406,16 @@ CLASS lcl_crawler IMPLEMENTATION.
       REPLACE ALL OCCURRENCES OF '(' IN lv_class_name WITH ''.
       TRANSLATE lv_class_name TO UPPER CASE.
 
-      IF lv_class_name(1) <> 'Z'.
+      SELECT SINGLE object
+        FROM tadir
+        WHERE obj_name = @lv_class_name
+          AND object   = 'CLAS'
+        INTO @DATA(lv_tadir).
+
+      IF ( lv_class_name(1) <> 'Y' AND lv_class_name(1) <> 'Z' ) OR lv_tadir IS INITIAL.
         RETURN.
       ENDIF.
+      CLEAR: lv_tadir.
 
       " >>> Inicia o Objeto
       ls_dependency-object   = lv_class_name.
@@ -393,7 +437,9 @@ ENDCLASS.
 INITIALIZATION.
   %_p_prog_%_app_%-text = 'Programa: '.
   %_p_clas_%_app_%-text = 'Classe: '.
+  %_p_func_%_app_%-text = 'Função: '.
 
 START-OF-SELECTION.
   NEW lcl_crawler( iv_prog = p_prog
-                   iv_clas = p_clas ).
+                   iv_clas = p_clas
+                   iv_func = p_func ).
