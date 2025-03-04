@@ -275,6 +275,33 @@ CLASS lcl_crawler IMPLEMENTATION.
 
     CREATE DATA cs_object-dependencies TYPE TABLE OF ty_dependency.
 
+    DATA: lt_source TYPE TABLE OF rssource.
+    DATA: lt_import_parameter TYPE TABLE OF rsimp.
+    DATA: lt_changing_parameter TYPE TABLE OF rscha.
+    DATA: lt_export_parameter TYPE TABLE OF rsexp.
+    DATA: lt_tables_parameter TYPE TABLE OF rstbl.
+    DATA: lt_exception_list TYPE TABLE OF rsexc.
+    DATA: lt_documentation TYPE TABLE OF rsfdo.
+
+    CALL FUNCTION 'RPY_FUNCTIONMODULE_READ'
+      EXPORTING
+        functionname       = CONV rs38l-name( cs_object-object )
+      TABLES
+        source             = lt_source
+        import_parameter   = lt_import_parameter
+        changing_parameter = lt_changing_parameter
+        export_parameter   = lt_export_parameter
+        tables_parameter   = lt_tables_parameter
+        exception_list     = lt_exception_list
+        documentation      = lt_documentation
+      EXCEPTIONS
+        error_message      = 1
+        function_not_found = 2
+        invalid_name       = 3
+        OTHERS             = 4.
+
+    cs_object-source = lt_source.
+
     LOOP AT cs_object-source INTO DATA(ls_source).
 
       CHECK ls_source IS NOT INITIAL.
@@ -292,6 +319,8 @@ CLASS lcl_crawler IMPLEMENTATION.
                     CHANGING  cs_object = cs_object ).
 
     ENDLOOP.
+
+    CLEAR: lt_source[].
 
   ENDMETHOD.
 
@@ -375,7 +404,7 @@ CLASS lcl_crawler IMPLEMENTATION.
 
       " >>> Inicia o Objeto
       ls_dependency-object   = lv_name_object.
-      ls_dependency-obj_type = 'PROGRAM'.
+      ls_dependency-obj_type = 'INCLUDE'.
 
       start_crawler_prog( CHANGING cs_object = ls_dependency ).
 
