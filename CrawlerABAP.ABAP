@@ -6,6 +6,7 @@
 REPORT zcar_crawler.
 
 PARAMETERS: p_prog TYPE progname.
+PARAMETERS: p_clas TYPE progname.
 
 TYPE-POOLS: seoc,
             seop.
@@ -25,12 +26,24 @@ CLASS lcl_crawler DEFINITION.
 
   PUBLIC SECTION.
 
-    DATA:  gt_objects TYPE TABLE OF ty_dependency.
+    DATA: gt_objects TYPE TABLE OF ty_dependency.
+
+    DATA: gv_is_include TYPE xfeld.
 
 
-    METHODS: constructor          IMPORTING iv_prog   TYPE progname.
+    METHODS: constructor          IMPORTING iv_prog TYPE progname
+                                            iv_clas TYPE progname.
     METHODS: start_crawler_prog   CHANGING  cs_object TYPE ty_dependency.
     METHODS: start_crawler_class  CHANGING  cs_object TYPE ty_dependency.
+    METHODS: start_crawler_funct  CHANGING  cs_object TYPE ty_dependency.
+
+    METHODS: add_program  IMPORTING is_source TYPE w3_html
+                          CHANGING  cs_object TYPE ty_dependency.
+    METHODS: add_class    IMPORTING is_source TYPE w3_html
+                          CHANGING  cs_object TYPE ty_dependency.
+    METHODS: add_function IMPORTING is_source TYPE w3_html
+                          CHANGING  cs_object TYPE ty_dependency.
+
     METHODS: display_dependencies.
 
 ENDCLASS.
@@ -41,13 +54,19 @@ CLASS lcl_crawler IMPLEMENTATION.
 
     " >>> Inicia o Objeto
     DATA ls_objects LIKE LINE OF gt_objects.
-    ls_objects-object = iv_prog.
     " <<< Inicia o Objeto
 
     " Se for um Programa
     IF iv_prog IS NOT INITIAL.
+      ls_objects-object = iv_prog.
       ls_objects-obj_type = 'PROGRAM'.
       start_crawler_prog( CHANGING cs_object = ls_objects ).
+    ENDIF.
+
+    IF iv_clas IS NOT INITIAL.
+      ls_objects-object = iv_clas.
+      ls_objects-obj_type = 'CLASS'.
+      start_crawler_class( CHANGING cs_object = ls_objects ).
     ENDIF.
 
     APPEND ls_objects TO gt_objects.
@@ -57,8 +76,6 @@ CLASS lcl_crawler IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD start_crawler_prog.
-
-    DATA: lv_is_include TYPE xfeld.
 
     ">>> Inicia o Objeto
     DATA lv_object_name TYPE progname.
@@ -72,66 +89,19 @@ CLASS lcl_crawler IMPLEMENTATION.
 
     LOOP AT cs_object-source INTO DATA(ls_source).
 
-      DATA ls_dependency TYPE ty_dependency.
+      CHECK ls_source IS NOT INITIAL.
 
-      " Programas Include
-      IF ls_source CS 'INCLUDE' OR lv_is_include = 'X'.
-        lv_is_include = 'X'.
-        IF ls_source CS '.'.
-          lv_is_include = ''.
-        ENDIF.
+      " Se Tiver Classes Adiciona
+      add_program( EXPORTING is_source = ls_source
+                   CHANGING  cs_object = cs_object ).
 
-        SPLIT ls_source AT ' ' INTO TABLE DATA(lt_object).
-        DATA(lv_last_line_include) = lines( lt_object ).
+      " Se Tiver Classes Adiciona
+      add_class( EXPORTING is_source = ls_source
+                 CHANGING  cs_object = cs_object ).
 
-        DATA(lv_name_object) = lt_object[ lv_last_line_include ].
-        REPLACE ALL OCCURRENCES OF '.' IN lv_name_object WITH ''.
-        REPLACE ALL OCCURRENCES OF ',' IN lv_name_object WITH ''.
-        TRANSLATE lv_name_object TO UPPER CASE.
-
-        " >>> Inicia o Objeto
-        ls_dependency-object   = lv_name_object.
-        ls_dependency-obj_type = 'PROGRAM'.
-
-        start_crawler_prog( CHANGING cs_object = ls_dependency ).
-
-        ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
-
-        APPEND ls_dependency TO <fs_dependencies>.
-      ENDIF.
-
-      " Classes REF TO ou NEW
-      IF ls_source CS 'TYPE REF TO' OR ls_source CS 'NEW'.
-        SPLIT ls_source AT ' ' INTO TABLE DATA(lt_rf_to).
-        DATA(lv_last_line) = lines( lt_rf_to ).
-
-        DATA(lv_class_name) = lt_rf_to[ lv_last_line ].
-        IF lv_class_name = ').'.
-          lv_class_name = lt_rf_to[ lv_last_line - 1 ].
-        ENDIF.
-
-        REPLACE ALL OCCURRENCES OF '.' IN lv_class_name WITH ''.
-        REPLACE ALL OCCURRENCES OF ',' IN lv_class_name WITH ''.
-        REPLACE ALL OCCURRENCES OF '(' IN lv_class_name WITH ''.
-        TRANSLATE lv_class_name TO UPPER CASE.
-
-        IF lv_class_name(1) <> 'Z'.
-          CONTINUE.
-        ENDIF.
-
-        " >>> Inicia o Objeto
-        ls_dependency-object   = lv_class_name.
-        ls_dependency-obj_type = 'CLASS'.
-
-        start_crawler_class( CHANGING cs_object = ls_dependency ).
-
-        ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
-
-        APPEND ls_dependency TO <fs_dependencies>.
-
-      ENDIF.
-
-      CLEAR: ls_dependency.
+      " Se Tiver Funções Adiciona
+      add_function( EXPORTING is_source = ls_source
+                    CHANGING  cs_object = cs_object ).
 
     ENDLOOP.
 
@@ -160,11 +130,15 @@ CLASS lcl_crawler IMPLEMENTATION.
 
     lo_clsref ?= lo_cifref.
 
+    IF lo_clsref IS NOT BOUND.
+      RETURN.
+    ENDIF.
+
     READ REPORT lo_clsref->class_pool
       INTO lt_source_pool.
     LOOP AT lt_source_pool INTO DATA(source_line).
-      IF   source_line CS 'CLASS-POOL'
-        OR source_line CS 'class-pool'.
+      IF   source_line CP 'CLASS-POOL'
+        OR source_line CP 'class-pool'.
         lv_tabix = sy-tabix.
         APPEND source_line TO cs_object-source.
         EXIT.
@@ -267,33 +241,31 @@ CLASS lcl_crawler IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-*    LOOP AT cs_object-source INTO DATA(ls_source).
-*
-*      " Programas Include
-*      IF ls_source CS 'INCLUDE'.
-*        SPLIT ls_source AT ' ' INTO TABLE DATA(lt_object).
-*
-*        IF lines( lt_object ) = 2.
-*          DATA(lv_name_object) = lt_object[ 2 ].
-*          REPLACE ALL OCCURRENCES OF '.' IN lv_name_object WITH ''.
-*          TRANSLATE lv_name_object TO UPPER CASE.
-*
-*          DATA ls_dependency TYPE ty_dependency.
-*
-*          " >>> Inicia o Objeto
-*          ls_dependency-object   = lv_name_object.
-*          ls_dependency-obj_type = 'PROG'.
-*
-*          start_crawler_prog( CHANGING cs_object = ls_dependency ).
-*
-*          ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
-*
-*          APPEND ls_dependency TO <fs_dependencies>.
-*
-*        ENDIF.
-*      ENDIF.
-*
-*    ENDLOOP.
+    DELETE cs_object-source WHERE table_line(1) = '*' OR table_line(1) = |"|.
+
+    LOOP AT cs_object-source INTO DATA(ls_source).
+
+      CHECK ls_source IS NOT INITIAL.
+
+      " Se Tiver Classes Adiciona
+      add_program( EXPORTING is_source = ls_source
+                   CHANGING  cs_object = cs_object ).
+
+      " Se Tiver Classes Adiciona
+      add_class( EXPORTING is_source = ls_source
+                 CHANGING  cs_object = cs_object ).
+
+      " Se Tiver Funções Adiciona
+      add_function( EXPORTING is_source = ls_source
+                    CHANGING  cs_object = cs_object ).
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD start_crawler_funct.
+
+    CREATE DATA cs_object-dependencies TYPE TABLE OF ty_dependency.
 
   ENDMETHOD.
 
@@ -308,11 +280,120 @@ CLASS lcl_crawler IMPLEMENTATION.
 
   ENDMETHOD.
 
+
+  METHOD add_function.
+
+    IF is_source CS 'CALL FUNCTION'.
+
+      DATA ls_dependency TYPE ty_dependency.
+
+      SPLIT is_source AT ' ' INTO TABLE DATA(lt_rf_fn).
+      DATA(lv_last_line_fn) = lines( lt_rf_fn ).
+
+      DATA(lv_func_name) = lt_rf_fn[ lv_last_line_fn ].
+
+      REPLACE ALL OCCURRENCES OF '.' IN lv_func_name WITH ''.
+      REPLACE ALL OCCURRENCES OF ',' IN lv_func_name WITH ''.
+      REPLACE ALL OCCURRENCES OF '(' IN lv_func_name WITH ''.
+      REPLACE ALL OCCURRENCES OF |'| IN lv_func_name WITH ''.
+      TRANSLATE lv_func_name TO UPPER CASE.
+
+      IF lv_func_name(1) <> 'Z'.
+        RETURN.
+      ENDIF.
+
+      " >>> Inicia o Objeto
+      ls_dependency-object   = lv_func_name.
+      ls_dependency-obj_type = 'FUNCTION'.
+
+      start_crawler_funct( CHANGING cs_object = ls_dependency ).
+
+      ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
+
+      APPEND ls_dependency TO <fs_dependencies>.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD add_program.
+
+    " Programas Include
+    IF is_source CS 'INCLUDE' OR gv_is_include = 'X'.
+
+      DATA ls_dependency TYPE ty_dependency.
+
+      gv_is_include = 'X'.
+      IF is_source CS '.'.
+        gv_is_include = ''.
+      ENDIF.
+
+      SPLIT is_source AT ' ' INTO TABLE DATA(lt_object).
+      DATA(lv_last_line_include) = lines( lt_object ).
+
+      DATA(lv_name_object) = lt_object[ lv_last_line_include ].
+      REPLACE ALL OCCURRENCES OF '.' IN lv_name_object WITH ''.
+      REPLACE ALL OCCURRENCES OF ',' IN lv_name_object WITH ''.
+      TRANSLATE lv_name_object TO UPPER CASE.
+
+      " >>> Inicia o Objeto
+      ls_dependency-object   = lv_name_object.
+      ls_dependency-obj_type = 'PROGRAM'.
+
+      start_crawler_prog( CHANGING cs_object = ls_dependency ).
+
+      ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
+
+      APPEND ls_dependency TO <fs_dependencies>.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD add_class.
+
+    " Classes REF TO ou NEW
+    IF is_source CS 'TYPE REF TO' OR is_source CS 'NEW'.
+
+      DATA ls_dependency TYPE ty_dependency.
+
+      SPLIT is_source AT ' ' INTO TABLE DATA(lt_rf_to).
+      DATA(lv_last_line) = lines( lt_rf_to ).
+
+      DATA(lv_class_name) = lt_rf_to[ lv_last_line ].
+      IF lv_class_name = ').' OR lv_class_name = '.'.
+        lv_class_name = lt_rf_to[ lv_last_line - 1 ].
+      ENDIF.
+
+      REPLACE ALL OCCURRENCES OF '.' IN lv_class_name WITH ''.
+      REPLACE ALL OCCURRENCES OF ',' IN lv_class_name WITH ''.
+      REPLACE ALL OCCURRENCES OF '(' IN lv_class_name WITH ''.
+      TRANSLATE lv_class_name TO UPPER CASE.
+
+      IF lv_class_name(1) <> 'Z'.
+        RETURN.
+      ENDIF.
+
+      " >>> Inicia o Objeto
+      ls_dependency-object   = lv_class_name.
+      ls_dependency-obj_type = 'CLASS'.
+
+      start_crawler_class( CHANGING cs_object = ls_dependency ).
+
+      ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
+
+      APPEND ls_dependency TO <fs_dependencies>.
+
+    ENDIF.
+
+  ENDMETHOD.
+
 ENDCLASS.
 
 
 INITIALIZATION.
   %_p_prog_%_app_%-text = 'Programa: '.
+  %_p_clas_%_app_%-text = 'Classe: '.
 
 START-OF-SELECTION.
-  NEW lcl_crawler( p_prog ).
+  NEW lcl_crawler( iv_prog = p_prog
+                   iv_clas = p_clas ).
