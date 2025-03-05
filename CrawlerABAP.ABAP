@@ -276,6 +276,7 @@ CLASS lcl_crawler IMPLEMENTATION.
     CREATE DATA cs_object-dependencies TYPE TABLE OF ty_dependency.
 
     DATA: lt_source TYPE TABLE OF rssource.
+    DATA: lt_source_new TYPE rsfb_source.
     DATA: lt_import_parameter TYPE TABLE OF rsimp.
     DATA: lt_changing_parameter TYPE TABLE OF rscha.
     DATA: lt_export_parameter TYPE TABLE OF rsexp.
@@ -283,7 +284,7 @@ CLASS lcl_crawler IMPLEMENTATION.
     DATA: lt_exception_list TYPE TABLE OF rsexc.
     DATA: lt_documentation TYPE TABLE OF rsfdo.
 
-    CALL FUNCTION 'RPY_FUNCTIONMODULE_READ'
+    CALL FUNCTION 'RPY_FUNCTIONMODULE_READ_NEW'
       EXPORTING
         functionname       = CONV rs38l-name( cs_object-object )
       TABLES
@@ -294,13 +295,15 @@ CLASS lcl_crawler IMPLEMENTATION.
         tables_parameter   = lt_tables_parameter
         exception_list     = lt_exception_list
         documentation      = lt_documentation
+      CHANGING
+        new_source         = lt_source_new
       EXCEPTIONS
         error_message      = 1
         function_not_found = 2
         invalid_name       = 3
         OTHERS             = 4.
 
-    cs_object-source = lt_source.
+    cs_object-source = lt_source_new.
 
     LOOP AT cs_object-source INTO DATA(ls_source).
 
