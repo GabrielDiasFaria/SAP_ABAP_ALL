@@ -31,6 +31,7 @@ CLASS lcl_crawler DEFINITION.
 
     DATA: gv_is_include TYPE xfeld.
 
+    DATA: lt_objects TYPE TABLE OF string.
 
     METHODS: constructor          IMPORTING iv_prog TYPE progname
                                             iv_clas TYPE progname
@@ -303,7 +304,8 @@ CLASS lcl_crawler IMPLEMENTATION.
         invalid_name       = 3
         OTHERS             = 4.
 
-    cs_object-source = lt_source_new.
+    cs_object-source = COND #( WHEN lt_source_new IS NOT INITIAL THEN lt_source_new
+                               ELSE lt_source ).
 
     LOOP AT cs_object-source INTO DATA(ls_source).
 
@@ -355,14 +357,23 @@ CLASS lcl_crawler IMPLEMENTATION.
       REPLACE ALL OCCURRENCES OF '(' IN lv_func_name WITH ''.
       REPLACE ALL OCCURRENCES OF |'| IN lv_func_name WITH ''.
       TRANSLATE lv_func_name TO UPPER CASE.
+      CONDENSE lv_func_name NO-GAPS.
 
-      IF lv_func_name(1) <> 'Z'.
+      IF lv_func_name(1) <> 'Z' OR lv_func_name = cs_object-object.
         RETURN.
       ENDIF.
+
+      APPEND lv_func_name TO lt_objects.
+      cl_progress_indicator=>progress_indicate( i_text = |Adicionando Objeto [{ lv_func_name } - { lines( lt_objects ) }.]|
+          i_processed          = 1
+          i_total              = 1
+          i_output_immediately = abap_false ).
 
       " >>> Inicia o Objeto
       ls_dependency-object   = lv_func_name.
       ls_dependency-obj_type = 'FUNCTION'.
+
+
 
       start_crawler_funct( CHANGING cs_object = ls_dependency ).
 
@@ -393,6 +404,7 @@ CLASS lcl_crawler IMPLEMENTATION.
       REPLACE ALL OCCURRENCES OF '.' IN lv_name_object WITH ''.
       REPLACE ALL OCCURRENCES OF ',' IN lv_name_object WITH ''.
       TRANSLATE lv_name_object TO UPPER CASE.
+      CONDENSE lv_name_object NO-GAPS.
 
       SELECT SINGLE object
         FROM tadir
@@ -404,6 +416,16 @@ CLASS lcl_crawler IMPLEMENTATION.
         RETURN.
       ENDIF.
       CLEAR: lv_tadir.
+
+      IF lv_name_object = cs_object-object.
+        RETURN.
+      ENDIF.
+
+      APPEND lv_name_object TO lt_objects.
+      cl_progress_indicator=>progress_indicate( i_text = |Adicionando Objeto [{ lv_name_object } - { lines( lt_objects ) }.]|
+          i_processed          = 1
+          i_total              = 1
+          i_output_immediately = abap_false ).
 
       " >>> Inicia o Objeto
       ls_dependency-object   = lv_name_object.
@@ -420,23 +442,45 @@ CLASS lcl_crawler IMPLEMENTATION.
 
   METHOD add_class.
 
+    CHECK is_source NS 'EXCEPTION'.
+
     " Classes REF TO ou NEW
-    IF is_source CS 'TYPE REF TO' OR is_source CS 'NEW'.
+    IF is_source CP 'TYPE REF TO' OR is_source CS '= NEW' OR is_source CS '=>'.
 
       DATA ls_dependency TYPE ty_dependency.
 
-      SPLIT is_source AT ' ' INTO TABLE DATA(lt_rf_to).
-      DATA(lv_last_line) = lines( lt_rf_to ).
+      IF is_source CS '=>'.
 
-      DATA(lv_class_name) = lt_rf_to[ lv_last_line ].
-      IF lv_class_name = ').' OR lv_class_name = '.'.
-        lv_class_name = lt_rf_to[ lv_last_line - 1 ].
+        SPLIT is_source AT '=>' INTO TABLE DATA(lt_static).
+        DATA(lv_class_name) = lt_static[ 1 ].
+
+        IF lv_class_name CS '='.
+          SPLIT lv_class_name AT '=' INTO TABLE lt_static.
+          DATA(lv_last_line) = lines( lt_static ).
+          lv_class_name = lt_static[ lv_last_line ].
+        ENDIF.
+
+      ELSE.
+
+        SPLIT is_source AT ' ' INTO TABLE DATA(lt_rf_to).
+        lv_last_line = lines( lt_rf_to ).
+
+        lv_class_name = lt_rf_to[ lv_last_line ].
+        IF lv_class_name = ').' OR lv_class_name = '.'.
+          lv_class_name = lt_rf_to[ lv_last_line - 1 ].
+        ENDIF.
+
       ENDIF.
 
       REPLACE ALL OCCURRENCES OF '.' IN lv_class_name WITH ''.
       REPLACE ALL OCCURRENCES OF ',' IN lv_class_name WITH ''.
       REPLACE ALL OCCURRENCES OF '(' IN lv_class_name WITH ''.
       TRANSLATE lv_class_name TO UPPER CASE.
+      CONDENSE lv_class_name NO-GAPS.
+
+      IF lv_class_name CS '.' OR lv_class_name CS '-'.
+        RETURN.
+      ENDIF.
 
       SELECT SINGLE object
         FROM tadir
@@ -448,6 +492,16 @@ CLASS lcl_crawler IMPLEMENTATION.
         RETURN.
       ENDIF.
       CLEAR: lv_tadir.
+
+      IF lv_class_name = cs_object-object.
+        RETURN.
+      ENDIF.
+
+      APPEND lv_class_name TO lt_objects.
+      cl_progress_indicator=>progress_indicate( i_text = |Adicionando Objeto [{ lv_class_name } - { lines( lt_objects ) }.]|
+          i_processed          = 1
+          i_total              = 1
+          i_output_immediately = abap_false ).
 
       " >>> Inicia o Objeto
       ls_dependency-object   = lv_class_name.
