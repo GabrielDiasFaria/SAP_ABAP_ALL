@@ -46,9 +46,10 @@ CLASS lcl_crawler DEFINITION.
     METHODS: constructor          IMPORTING iv_prog TYPE progname
                                             iv_clas TYPE progname
                                             iv_func TYPE progname.
-    METHODS: start_crawler_prog   CHANGING  cs_object TYPE ty_dependency.
-    METHODS: start_crawler_class  CHANGING  cs_object TYPE ty_dependency.
-    METHODS: start_crawler_funct  CHANGING  cs_object TYPE ty_dependency.
+    METHODS: start_crawler_prog        CHANGING  cs_object TYPE ty_dependency.
+    METHODS: start_crawler_class       CHANGING  cs_object TYPE ty_dependency.
+    METHODS: start_crawler_full_class  CHANGING  cs_object TYPE ty_dependency.
+    METHODS: start_crawler_funct       CHANGING  cs_object TYPE ty_dependency.
 
     METHODS: add_program  IMPORTING is_source TYPE w3_html
                           CHANGING  cs_object TYPE ty_dependency.
@@ -79,7 +80,7 @@ CLASS lcl_crawler IMPLEMENTATION.
     IF iv_clas IS NOT INITIAL.
       ls_objects-object = iv_clas.
       ls_objects-obj_type = 'CLASS'.
-      start_crawler_class( CHANGING cs_object = ls_objects ).
+      start_crawler_full_class( CHANGING cs_object = ls_objects ).
     ENDIF.
 
     IF iv_func IS NOT INITIAL.
@@ -122,11 +123,88 @@ CLASS lcl_crawler IMPLEMENTATION.
       add_function( EXPORTING is_source = ls_source
                     CHANGING  cs_object = cs_object ).
 
+      ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
+      SORT <fs_dependencies>.
+      DELETE ADJACENT DUPLICATES FROM <fs_dependencies>.
+
     ENDLOOP.
 
   ENDMETHOD.
 
   METHOD start_crawler_class.
+
+    ">>> Inicia o Objeto
+    CREATE DATA cs_object-dependencies TYPE TABLE OF ty_dependency.
+    "<<< Inicia o Objeto
+
+    DATA lt_source TYPE seop_source.
+
+    CALL FUNCTION 'SEO_METHOD_GET_SOURCE'
+      EXPORTING
+        mtdkey                        = VALUE seocpdkey( clsname = cs_object-object cpdname = cs_object-obj_method )
+      IMPORTING
+        source                        = lt_source
+      EXCEPTIONS
+        _internal_method_not_existing = 1
+        _internal_class_not_existing  = 2
+        version_not_existing          = 3
+        inactive_new                  = 4
+        inactive_deleted              = 5
+        OTHERS                        = 6.
+
+    IF sy-subrc NE 0 OR lt_source IS INITIAL.
+      SELECT SINGLE *
+        FROM seometarel
+        WHERE clsname = @cs_object-object
+          AND reltype = '2'
+        INTO @DATA(ls_superclass).
+
+      CALL FUNCTION 'SEO_METHOD_GET_SOURCE'
+        EXPORTING
+          mtdkey                        = VALUE seocpdkey( clsname = ls_superclass-refclsname cpdname = cs_object-obj_method )
+        IMPORTING
+          source                        = lt_source
+        EXCEPTIONS
+          _internal_method_not_existing = 1
+          _internal_class_not_existing  = 2
+          version_not_existing          = 3
+          inactive_new                  = 4
+          inactive_deleted              = 5
+          OTHERS                        = 6.
+
+    ENDIF.
+
+    IF lt_source IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    cs_object-source = lt_source.
+
+    LOOP AT cs_object-source INTO DATA(ls_source).
+
+      CHECK ls_source IS NOT INITIAL.
+
+      " Se Tiver Programas Adiciona
+      add_program( EXPORTING is_source = ls_source
+                   CHANGING  cs_object = cs_object ).
+
+      " Se Tiver Classes Adiciona
+      add_class( EXPORTING is_source = ls_source
+                 CHANGING  cs_object = cs_object ).
+
+      " Se Tiver Funções Adiciona
+      add_function( EXPORTING is_source = ls_source
+                    CHANGING  cs_object = cs_object ).
+
+      ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
+      SORT <fs_dependencies>.
+      DELETE ADJACENT DUPLICATES FROM <fs_dependencies>.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD start_crawler_full_class.
 
     DATA: lo_cifref       TYPE REF TO if_oo_clif_incl_naming.
     DATA: lo_clsref       TYPE REF TO if_oo_class_incl_naming.
@@ -262,32 +340,7 @@ CLASS lcl_crawler IMPLEMENTATION.
 
     DELETE cs_object-source WHERE table_line(1) = '*' OR table_line(1) = |"|.
 
-    DATA lv_index_method TYPE sy-tabix.
-    DATA lv_index_endmethod TYPE sy-tabix.
-
     LOOP AT cs_object-source INTO DATA(ls_source).
-      IF ls_source CS |METHOD { cs_object-obj_method }|.
-        lv_index_method = sy-tabix.
-      ENDIF.
-      IF    lv_index_method IS NOT INITIAL
-        AND lv_index_endmethod IS INITIAL.
-        IF ls_source CS |ENDMETHOD.|.
-          lv_index_endmethod = sy-tabix.
-          EXIT.
-        ENDIF.
-      ENDIF.
-    ENDLOOP.
-
-    IF lv_index_method IS INITIAL OR lv_index_endmethod IS INITIAL.
-      CLEAR: cs_object-source.
-      RETURN.
-    ENDIF.
-
-    DELETE cs_object-source FROM 1 TO lv_index_method - 1.
-    DELETE cs_object-source FROM lv_index_endmethod - lv_index_method + 2 TO lines( cs_object-source ).
-    CLEAR: lv_index_method, lv_index_endmethod.
-
-    LOOP AT cs_object-source INTO ls_source.
 
       CHECK ls_source IS NOT INITIAL.
 
@@ -302,6 +355,10 @@ CLASS lcl_crawler IMPLEMENTATION.
       " Se Tiver Funções Adiciona
       add_function( EXPORTING is_source = ls_source
                     CHANGING  cs_object = cs_object ).
+
+      ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
+      SORT <fs_dependencies>.
+      DELETE ADJACENT DUPLICATES FROM <fs_dependencies>.
 
     ENDLOOP.
 
@@ -357,6 +414,10 @@ CLASS lcl_crawler IMPLEMENTATION.
       " Se Tiver Funções Adiciona
       add_function( EXPORTING is_source = ls_source
                     CHANGING  cs_object = cs_object ).
+
+      ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
+      SORT <fs_dependencies>.
+      DELETE ADJACENT DUPLICATES FROM <fs_dependencies>.
 
     ENDLOOP.
 
@@ -479,6 +540,7 @@ CLASS lcl_crawler IMPLEMENTATION.
 
     IF is_source CS 'TYPE REF TO'.
       SPLIT is_source AT ' ' INTO TABLE DATA(lt_ref_to).
+      DELETE lt_ref_to WHERE table_line IS INITIAL.
       DATA(lv_lines_ref_to) = lines( lt_ref_to ).
       DATA(lv_class_ref_to) = lt_ref_to[ lv_lines_ref_to ].
       REPLACE ALL OCCURRENCES OF '.' IN lv_class_ref_to WITH ''.
@@ -489,14 +551,18 @@ CLASS lcl_crawler IMPLEMENTATION.
                       object = cs_object-object ) TO gt_classes.
     ELSEIF is_source CS '= NEW'.
       SPLIT is_source AT ' ' INTO TABLE DATA(lt_new).
+      DELETE lt_new WHERE table_line IS INITIAL.
       DATA(lv_lines_new) = lines( lt_new ).
 
       SPLIT lt_new[ 1 ] AT '(' INTO TABLE DATA(lt_variable_new).
+      DELETE lt_variable_new WHERE table_line IS INITIAL.
       DATA(lv_variable) = lt_variable_new[ 2 ].
       REPLACE ALL OCCURRENCES OF ')' IN lv_variable WITH ''.
 
       SPLIT is_source AT 'NEW' INTO TABLE DATA(lt_new_split).
+      DELETE lt_new_split WHERE table_line IS INITIAL.
       SPLIT lt_new_split[ 2 ] AT '(' INTO TABLE DATA(lt_class_new).
+      DELETE lt_class_new WHERE table_line IS INITIAL.
       DATA(lv_class_new) = lt_class_new[ 1 ].
       TRANSLATE lv_class_new TO UPPER CASE.
       CONDENSE lv_class_new NO-GAPS.
@@ -514,16 +580,15 @@ CLASS lcl_crawler IMPLEMENTATION.
       DATA ls_dependency TYPE ty_dependency.
 
       " Chamadas Estáticas
-      IF is_source CS '=>'.
-        SPLIT is_source AT '=>' INTO TABLE DATA(lt_static).
-        lv_class_name = lt_static[ 1 ].
-        lv_method_name = lt_static[ 2 ].
+      IF is_source CS '->' AND is_source CS '=>'.
+*        zcicl_data=>create( )->get_data( EXPORTING is_interface          = gs_interface
+        SPLIT is_source AT '>' INTO TABLE DATA(lt_auto_create).
+        lv_class_name = lt_auto_create[ 1 ].
 
-        SPLIT lv_method_name AT '(' INTO TABLE DATA(lt_method_static).
-        lv_method_name = lt_method_static[ 1 ].
+        SPLIT lt_auto_create[ 3 ] AT '(' INTO TABLE lt_auto_create.
+        lv_method_name = lt_auto_create[ 1 ].
 
-        "Chamadas Instancias
-      ELSE.
+      ELSEIF is_source CS '->'.
         SPLIT is_source AT '->' INTO TABLE DATA(lt_instance).
         lv_class_name  = lt_instance[ 1 ].
         lv_method_name = lt_instance[ 2 ].
@@ -534,8 +599,19 @@ CLASS lcl_crawler IMPLEMENTATION.
         DATA(ls_object) = VALUE #( gt_classes[ object = cs_object-object variable = lv_class_name ] OPTIONAL ).
         lv_class_name = ls_object-class.
 
+
+        "Chamadas Instancias
+      ELSE.
+        SPLIT is_source AT '=>' INTO TABLE DATA(lt_static).
+        lv_class_name = lt_static[ 1 ].
+        lv_method_name = lt_static[ 2 ].
+
+        SPLIT lv_method_name AT '(' INTO TABLE DATA(lt_method_static).
+        lv_method_name = lt_method_static[ 1 ].
+
       ENDIF.
 
+      REPLACE ALL OCCURRENCES OF '=' IN lv_class_name WITH ''.
       REPLACE ALL OCCURRENCES OF '.' IN lv_class_name WITH ''.
       REPLACE ALL OCCURRENCES OF ',' IN lv_class_name WITH ''.
       REPLACE ALL OCCURRENCES OF '(' IN lv_class_name WITH ''.
