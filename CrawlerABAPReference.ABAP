@@ -110,6 +110,8 @@ CLASS lcl_crawler IMPLEMENTATION.
     LOOP AT cs_object-source INTO DATA(ls_source).
 
       CHECK ls_source IS NOT INITIAL.
+      CONDENSE ls_source.
+      CHECK ls_source(1) NE '*' AND ls_source(1) NE '"'.
 
       " Se Tiver Classes Adiciona
       add_program( EXPORTING is_source = ls_source
@@ -180,9 +182,13 @@ CLASS lcl_crawler IMPLEMENTATION.
 
     cs_object-source = lt_source.
 
+    DELETE cs_object-source WHERE table_line(1) = '*' OR table_line(1) = |"|.
+
     LOOP AT cs_object-source INTO DATA(ls_source).
 
       CHECK ls_source IS NOT INITIAL.
+      CONDENSE ls_source.
+      CHECK ls_source(1) NE '*' AND ls_source(1) NE '"'.
 
       " Se Tiver Programas Adiciona
       add_program( EXPORTING is_source = ls_source
@@ -343,6 +349,8 @@ CLASS lcl_crawler IMPLEMENTATION.
     LOOP AT cs_object-source INTO DATA(ls_source).
 
       CHECK ls_source IS NOT INITIAL.
+      CONDENSE ls_source.
+      CHECK ls_source(1) NE '*' AND ls_source(1) NE '"'.
 
       " Se Tiver Programas Adiciona
       add_program( EXPORTING is_source = ls_source
@@ -399,9 +407,13 @@ CLASS lcl_crawler IMPLEMENTATION.
     cs_object-source = COND #( WHEN lt_source_new IS NOT INITIAL THEN lt_source_new
                                ELSE lt_source ).
 
+    DELETE cs_object-source WHERE table_line(1) = '*' OR table_line(1) = |"|.
+
     LOOP AT cs_object-source INTO DATA(ls_source).
 
       CHECK ls_source IS NOT INITIAL.
+      CONDENSE ls_source.
+      CHECK ls_source(1) NE '*' AND ls_source(1) NE '"'.
 
       " Se Tiver Programas Adiciona
       add_program( EXPORTING is_source = ls_source
@@ -556,7 +568,12 @@ CLASS lcl_crawler IMPLEMENTATION.
 
       SPLIT lt_new[ 1 ] AT '(' INTO TABLE DATA(lt_variable_new).
       DELETE lt_variable_new WHERE table_line IS INITIAL.
-      DATA(lv_variable) = lt_variable_new[ 2 ].
+      IF LINES( lt_variable_new ) = 1.
+        DATA(lv_variable) = lt_variable_new[ 1 ].
+      ELSE.
+        lv_variable = lt_variable_new[ 2 ].
+      ENDIF.
+
       REPLACE ALL OCCURRENCES OF ')' IN lv_variable WITH ''.
 
       SPLIT is_source AT 'NEW' INTO TABLE DATA(lt_new_split).
