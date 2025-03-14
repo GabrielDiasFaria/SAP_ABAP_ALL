@@ -385,6 +385,38 @@ CLASS lcl_crawler IMPLEMENTATION.
     DATA: lt_exception_list TYPE TABLE OF rsexc.
     DATA: lt_documentation TYPE TABLE OF rsfdo.
 
+    " Buscar Include da FM para garantir as dependencias
+    SELECT SINGLE *
+      FROM tfdir
+      WHERE funcname = @cs_object-object
+      INTO @DATA(ls_include).
+    IF ls_include IS INITIAL.
+      RETURN.
+
+    ELSE.
+
+      DATA: lt_include_fm      TYPE w3_htmltab.
+      DATA: lt_include_source  TYPE w3_htmltab.
+      DATA: lt_include_sources TYPE w3_htmltab.
+      DATA: lt_include_name    TYPE TABLE OF string.
+      DATA: lv_include_name    TYPE w3_html.
+      READ REPORT ls_include-pname INTO lt_include_fm.
+      DELETE lt_include_fm WHERE table_line NS 'INCLUDE z'.
+      LOOP AT lt_include_fm INTO DATA(ls_include_fm).
+        CONDENSE ls_include_fm.
+        SPLIT ls_include_fm AT ' ' INTO TABLE lt_include_name.
+        lv_include_name = CONV string( lt_include_name[ 2 ] ).
+        REPLACE ALL OCCURRENCES OF '.' IN lv_include_name WITH ''.
+        READ REPORT lv_include_name INTO lt_include_source.
+        DELETE lt_include_source WHERE table_line(1) = '*' OR table_line(1) = |"|.
+
+        APPEND LINES OF lt_include_source TO lt_include_sources.
+
+        CLEAR: lt_include_source[], lt_include_name[], lv_include_name, ls_include_fm.
+      ENDLOOP.
+
+    ENDIF.
+
     CALL FUNCTION 'RPY_FUNCTIONMODULE_READ_NEW'
       EXPORTING
         functionname       = CONV rs38l-name( cs_object-object )
@@ -404,8 +436,10 @@ CLASS lcl_crawler IMPLEMENTATION.
         invalid_name       = 3
         OTHERS             = 4.
 
-    cs_object-source = COND #( WHEN lt_source_new IS NOT INITIAL THEN lt_source_new
-                               ELSE lt_source ).
+    APPEND LINES OF lt_include_sources TO cs_object-source.
+    APPEND '    ' TO cs_object-source.
+    APPEND LINES OF lt_source_new TO cs_object-source.
+    APPEND LINES OF lt_source TO cs_object-source.
 
     DELETE cs_object-source WHERE table_line(1) = '*' OR table_line(1) = |"|.
 
@@ -568,7 +602,7 @@ CLASS lcl_crawler IMPLEMENTATION.
 
       SPLIT lt_new[ 1 ] AT '(' INTO TABLE DATA(lt_variable_new).
       DELETE lt_variable_new WHERE table_line IS INITIAL.
-      IF LINES( lt_variable_new ) = 1.
+      IF lines( lt_variable_new ) = 1.
         DATA(lv_variable) = lt_variable_new[ 1 ].
       ELSE.
         lv_variable = lt_variable_new[ 2 ].
@@ -620,7 +654,7 @@ CLASS lcl_crawler IMPLEMENTATION.
         DATA(ls_object) = VALUE #( gt_classes[ object = cs_object-object variable = lv_class_name ] OPTIONAL ).
         lv_class_name = ls_object-class.
 
-      " Chamadas de Métodos Locais
+        " Chamadas de Métodos Locais
       ELSEIF is_source CS '(' AND ( is_source CS 'EXPORTING' OR
                                   is_source CS 'CHANGING' OR
                                   is_source CS 'IMPORTING' OR
