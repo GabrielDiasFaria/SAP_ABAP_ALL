@@ -590,7 +590,11 @@ CLASS lcl_crawler IMPLEMENTATION.
     ENDIF.
 
     " Caso seja uma chamada de método!!!
-    IF ( is_source CS '=>' OR is_source CS '->' ) AND ( is_source CS '(' OR is_source CS ')' ).
+    IF ( ( is_source CS '=>' OR is_source CS '->' ) AND ( is_source CS '(' OR is_source CS ')' ) ) OR
+       ( is_source CS '(' AND ( is_source CS 'EXPORTING' OR
+                                  is_source CS 'CHANGING' OR
+                                  is_source CS 'IMPORTING' OR
+                                  is_source CS ')' ) ).
 
       DATA lv_class_name  TYPE string.
       DATA lv_method_name TYPE string.
@@ -616,6 +620,14 @@ CLASS lcl_crawler IMPLEMENTATION.
         DATA(ls_object) = VALUE #( gt_classes[ object = cs_object-object variable = lv_class_name ] OPTIONAL ).
         lv_class_name = ls_object-class.
 
+      " Chamadas de Métodos Locais
+      ELSEIF is_source CS '(' AND ( is_source CS 'EXPORTING' OR
+                                  is_source CS 'CHANGING' OR
+                                  is_source CS 'IMPORTING' OR
+                                  is_source CS ')' ).
+        SPLIT is_source AT '(' INTO TABLE DATA(lt_local_method).
+        lv_class_name  = cs_object-object.
+        lv_method_name = lt_local_method[ 1 ].
 
         "Chamadas Instancias
       ELSE.
@@ -641,7 +653,7 @@ CLASS lcl_crawler IMPLEMENTATION.
       TRANSLATE lv_method_name TO UPPER CASE.
       CONDENSE lv_method_name NO-GAPS.
 
-      IF lv_class_name IS INITIAL OR lv_class_name CS '.' OR lv_class_name CS '-' OR lv_class_name(1) NE 'Z' .
+      IF lv_class_name IS INITIAL OR lv_class_name CS '.' OR lv_class_name CS '-' OR lv_class_name(1) NE 'Z'.
         RETURN.
       ENDIF.
 
@@ -656,7 +668,7 @@ CLASS lcl_crawler IMPLEMENTATION.
       ENDIF.
       CLEAR: lv_tadir.
 
-      IF lv_class_name = cs_object-object.
+      IF lv_class_name = cs_object-object AND lv_method_name = cs_object-obj_method.
         RETURN.
       ENDIF.
 
@@ -672,6 +684,10 @@ CLASS lcl_crawler IMPLEMENTATION.
       ls_dependency-obj_method = lv_method_name.
 
       start_crawler_class( CHANGING cs_object = ls_dependency ).
+
+      IF ls_dependency-source IS INITIAL.
+        RETURN.
+      ENDIF.
 
       ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
 
