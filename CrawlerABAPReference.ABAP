@@ -9,6 +9,9 @@ PARAMETERS: p_prog TYPE progname.
 PARAMETERS: p_clas TYPE progname.
 PARAMETERS: p_func TYPE progname.
 
+PARAMETERS: ch_exp AS CHECKBOX.
+
+
 TYPE-POOLS: seoc,
             seop.
 
@@ -478,7 +481,13 @@ CLASS lcl_crawler IMPLEMENTATION.
     CALL TRANSFORMATION sjson2html SOURCE XML lv_json
                                RESULT XML DATA(html).
 
-    cl_abap_browser=>show_html( html_string = cl_abap_codepage=>convert_from( html ) ).
+   IF ch_exp = 'X'.
+     EXPORT lv_crawler_json = lv_json TO MEMORY ID 'ZCAR_CRAWLER_JSON'.
+   ELSE.
+     cl_abap_browser=>show_html( html_string = cl_abap_codepage=>convert_from( html ) ).
+   ENDIF.
+
+
 
   ENDMETHOD.
 
@@ -738,6 +747,7 @@ INITIALIZATION.
   %_p_prog_%_app_%-text = 'Programa: '.
   %_p_clas_%_app_%-text = 'Classe: '.
   %_p_func_%_app_%-text = 'Função: '.
+  %_ch_exp_%_app_%-text = 'Exportar? '.
 
 START-OF-SELECTION.
   NEW lcl_crawler( iv_prog = p_prog
