@@ -17,11 +17,12 @@ TYPE-POOLS: seoc,
             seop.
 
 TYPES: BEGIN OF ty_dependency,
-         object       TYPE string,
-         obj_type     TYPE string,
-         obj_method   TYPE string,
-         source       TYPE w3_htmltab,
-         dependencies TYPE REF TO data,
+         object           TYPE string,
+         obj_type         TYPE string,
+         obj_method       TYPE string,
+         source           TYPE w3_htmltab,
+         source_extension TYPE w3_htmltab,
+         dependencies     TYPE REF TO data,
        END OF ty_dependency,
        tt_dependency TYPE TABLE OF ty_dependency WITH DEFAULT KEY.
 FIELD-SYMBOLS: <fs_dependencies> TYPE tt_dependency.
@@ -80,24 +81,24 @@ CLASS lcl_crawler IMPLEMENTATION.
 
     " Se for um Programa
     IF iv_prog IS NOT INITIAL.
-      ls_objects-object = iv_prog.
+      ls_objects-object   = iv_prog.
       ls_objects-obj_type = 'PROGRAM'.
       start_crawler_prog( CHANGING cs_object = ls_objects ).
     ENDIF.
 
-    IF iv_clas IS NOT INITIAL AND ls_objects IS INITIAL.
-      ls_objects-object = iv_clas.
+    IF iv_clas IS NOT INITIAL AND ls_objects-source IS INITIAL.
+      ls_objects-object   = iv_clas.
       ls_objects-obj_type = 'CLASS'.
       start_crawler_full_class( CHANGING cs_object = ls_objects ).
     ENDIF.
 
-    IF iv_func IS NOT INITIAL AND ls_objects IS INITIAL.
-      ls_objects-object = iv_clas.
+    IF iv_func IS NOT INITIAL AND ls_objects-source IS INITIAL.
+      ls_objects-object   = iv_clas.
       ls_objects-obj_type = 'FUNCTION'.
       start_crawler_funct( CHANGING cs_object = ls_objects ).
     ENDIF.
 
-    IF iv_cds IS NOT INITIAL AND ls_objects IS INITIAL.
+    IF iv_cds IS NOT INITIAL AND ls_objects-source IS INITIAL.
       ls_objects-object   = iv_cds.
       ls_objects-obj_type = 'CDS'.
       start_crawler_cds( CHANGING cs_object = ls_objects ).
@@ -507,6 +508,12 @@ CLASS lcl_crawler IMPLEMENTATION.
       SPLIT ls_cds-source AT cl_abap_char_utilities=>cr_lf INTO TABLE cs_object-source.
       DELETE cs_object-source WHERE table_line CS '/*'.
 
+      SELECT SINGLE *
+        FROM ddlxsrc_src
+        WHERE ddlxname = @cs_object-object
+        INTO @DATA(ls_metadata_extension).
+      SPLIT ls_metadata_extension-source AT cl_abap_char_utilities=>cr_lf INTO TABLE cs_object-source_extension.
+
     ELSE.
       " Se não é CDS é Tabela
       DATA lt_table_fields TYPE TABLE OF dd03p.
@@ -565,6 +572,7 @@ CLASS lcl_crawler IMPLEMENTATION.
     SELECT SINGLE *
       FROM tadir
       WHERE obj_name = @lv_cds_name
+        AND object   = 'STOB'
       INTO @DATA(ls_tadir).
 
     " >>> Inicia o Objeto
