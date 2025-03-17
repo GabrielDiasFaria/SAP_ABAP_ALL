@@ -8,6 +8,7 @@ REPORT zcar_crawler.
 PARAMETERS: p_prog TYPE progname.
 PARAMETERS: p_clas TYPE progname.
 PARAMETERS: p_func TYPE progname.
+PARAMETERS: p_cds  TYPE progname.
 
 PARAMETERS: ch_exp AS CHECKBOX.
 
@@ -48,8 +49,10 @@ CLASS lcl_crawler DEFINITION.
 
     METHODS: constructor          IMPORTING iv_prog TYPE progname
                                             iv_clas TYPE progname
-                                            iv_func TYPE progname.
+                                            iv_func TYPE progname
+                                            iv_cds  TYPE progname.
     METHODS: start_crawler_prog        CHANGING  cs_object TYPE ty_dependency.
+    METHODS: start_crawler_cds         CHANGING  cs_object TYPE ty_dependency.
     METHODS: start_crawler_class       CHANGING  cs_object TYPE ty_dependency.
     METHODS: start_crawler_full_class  CHANGING  cs_object TYPE ty_dependency.
     METHODS: start_crawler_funct       CHANGING  cs_object TYPE ty_dependency.
@@ -59,6 +62,8 @@ CLASS lcl_crawler DEFINITION.
     METHODS: add_class    IMPORTING is_source TYPE w3_html
                           CHANGING  cs_object TYPE ty_dependency.
     METHODS: add_function IMPORTING is_source TYPE w3_html
+                          CHANGING  cs_object TYPE ty_dependency.
+    METHODS: add_cds      IMPORTING is_source TYPE w3_html
                           CHANGING  cs_object TYPE ty_dependency.
 
     METHODS: display_dependencies.
@@ -80,16 +85,22 @@ CLASS lcl_crawler IMPLEMENTATION.
       start_crawler_prog( CHANGING cs_object = ls_objects ).
     ENDIF.
 
-    IF iv_clas IS NOT INITIAL.
+    IF iv_clas IS NOT INITIAL AND ls_objects IS INITIAL.
       ls_objects-object = iv_clas.
       ls_objects-obj_type = 'CLASS'.
       start_crawler_full_class( CHANGING cs_object = ls_objects ).
     ENDIF.
 
-    IF iv_func IS NOT INITIAL.
+    IF iv_func IS NOT INITIAL AND ls_objects IS INITIAL.
       ls_objects-object = iv_clas.
       ls_objects-obj_type = 'FUNCTION'.
       start_crawler_funct( CHANGING cs_object = ls_objects ).
+    ENDIF.
+
+    IF iv_cds IS NOT INITIAL AND ls_objects IS INITIAL.
+      ls_objects-object   = iv_cds.
+      ls_objects-obj_type = 'CDS'.
+      start_crawler_cds( CHANGING cs_object = ls_objects ).
     ENDIF.
 
     APPEND ls_objects TO gt_objects.
@@ -474,6 +485,101 @@ CLASS lcl_crawler IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD start_crawler_cds.
+
+    CREATE DATA cs_object-dependencies TYPE TABLE OF ty_dependency.
+
+    SELECT SINGLE *
+      FROM tadir
+      WHERE obj_name = @cs_object-object
+        AND object   = 'STOB'
+      INTO @DATA(ls_tadir_cds).
+
+    IF ls_tadir_cds IS NOT INITIAL.
+      SELECT SINGLE ddddlsrc~ddlname,
+           ddddlsrc~source,
+           ddddlsrct~ddtext
+      FROM ddddlsrc
+      JOIN ddddlsrct ON ddddlsrc~ddlname = ddddlsrct~ddlname
+      WHERE ddddlsrc~ddlname = @cs_object-object
+      INTO @DATA(ls_cds).
+
+      SPLIT ls_cds-source AT cl_abap_char_utilities=>cr_lf INTO TABLE cs_object-source.
+      DELETE cs_object-source WHERE table_line CS '/*'.
+
+    ELSE.
+      " Se não é CDS é Tabela
+      DATA lt_table_fields TYPE TABLE OF dd03p.
+      CALL FUNCTION 'DDIF_TABL_GET'
+        EXPORTING
+          name          = CONV ddobjname( cs_object-object )
+        TABLES
+          dd03p_tab     = lt_table_fields
+        EXCEPTIONS
+          illegal_input = 1
+          OTHERS        = 2.
+
+      cs_object-source = VALUE w3_htmltab( FOR ls IN lt_table_fields ( |CAMPO: { ls-fieldname }; ELEMENTO_DADOS: { ls-rollname }; TIPO: { ls-inttype }| ) ).
+
+    ENDIF.
+
+    LOOP AT cs_object-source INTO DATA(ls_source).
+
+      CONDENSE ls_source.
+
+      CHECK ls_source IS NOT INITIAL.
+      CHECK ls_source CS 'projection on' OR
+            ls_source CS 'select from' OR
+            ls_source CS 'association' OR
+            ls_source CS 'join' .
+
+      add_cds( EXPORTING is_source = ls_source
+               CHANGING  cs_object = cs_object ).
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD add_cds.
+
+    DATA ls_dependency TYPE ty_dependency.
+
+    DATA lv_cds_name TYPE string.
+
+    IF is_source CS 'projection on' OR is_source CS 'select from'.
+      SPLIT is_source AT ' ' INTO TABLE DATA(lt_projections).
+      DATA(lv_projections) = lines( lt_projections ).
+      lv_cds_name = lt_projections[ lv_projections ].
+    ELSEIF is_source CS 'association'.
+      SPLIT is_source AT ' ' INTO TABLE DATA(lt_associations).
+      lv_cds_name = lt_associations[ 4 ].
+    ELSEIF is_source CS 'join'.
+    ENDIF.
+
+    APPEND lv_cds_name TO gt_objects_list.
+    cl_progress_indicator=>progress_indicate( i_text = |Adicionando Objeto [{ lv_cds_name } - { lines( gt_objects_list ) }.]|
+        i_processed          = 1
+        i_total              = 1
+        i_output_immediately = abap_false ).
+
+    SELECT SINGLE *
+      FROM tadir
+      WHERE obj_name = @lv_cds_name
+      INTO @DATA(ls_tadir).
+
+    " >>> Inicia o Objeto
+    ls_dependency-object   = lv_cds_name.
+    TRANSLATE ls_dependency-object TO UPPER CASE.
+    ls_dependency-obj_type = COND string( WHEN ls_tadir-object = 'STOB' THEN 'CDS' ELSE 'TABLE' ).
+
+    start_crawler_cds( CHANGING cs_object = ls_dependency ).
+
+    ASSIGN cs_object-dependencies->* TO <fs_dependencies>.
+
+    APPEND ls_dependency TO <fs_dependencies>.
+
+  ENDMETHOD.
+
   METHOD display_dependencies.
 
     DATA(lv_json) = /ui2/cl_json=>serialize( gt_objects ).
@@ -481,13 +587,11 @@ CLASS lcl_crawler IMPLEMENTATION.
     CALL TRANSFORMATION sjson2html SOURCE XML lv_json
                                RESULT XML DATA(html).
 
-   IF ch_exp = 'X'.
-     EXPORT lv_crawler_json = lv_json TO MEMORY ID 'ZCAR_CRAWLER_JSON'.
-   ELSE.
-     cl_abap_browser=>show_html( html_string = cl_abap_codepage=>convert_from( html ) ).
-   ENDIF.
-
-
+    IF ch_exp = 'X'.
+      EXPORT lv_crawler_json = lv_json TO MEMORY ID 'ZCAR_CRAWLER_JSON'.
+    ELSE.
+      cl_abap_browser=>show_html( html_string = cl_abap_codepage=>convert_from( html ) ).
+    ENDIF.
 
   ENDMETHOD.
 
@@ -747,9 +851,11 @@ INITIALIZATION.
   %_p_prog_%_app_%-text = 'Programa: '.
   %_p_clas_%_app_%-text = 'Classe: '.
   %_p_func_%_app_%-text = 'Função: '.
+  %_p_cds_%_app_%-text  = 'CDS: '.
   %_ch_exp_%_app_%-text = 'Exportar? '.
 
 START-OF-SELECTION.
   NEW lcl_crawler( iv_prog = p_prog
                    iv_clas = p_clas
-                   iv_func = p_func ).
+                   iv_func = p_func
+                   iv_cds  = p_cds ).
