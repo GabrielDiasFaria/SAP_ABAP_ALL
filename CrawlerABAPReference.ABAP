@@ -563,6 +563,8 @@ CLASS lcl_crawler IMPLEMENTATION.
     ELSEIF is_source CS 'join'.
     ENDIF.
 
+    CHECK lv_cds_name IS NOT INITIAL.
+
     APPEND lv_cds_name TO gt_objects_list.
     cl_progress_indicator=>progress_indicate( i_text = |Adicionando Objeto [{ lv_cds_name } - { lines( gt_objects_list ) }.]|
         i_processed          = 1
