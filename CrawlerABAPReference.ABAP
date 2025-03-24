@@ -554,7 +554,8 @@ CLASS lcl_crawler IMPLEMENTATION.
     DATA lv_cds_name TYPE string.
 
     IF is_source CS 'projection on' OR is_source CS 'select from'.
-      SPLIT is_source AT ' ' INTO TABLE DATA(lt_projections).
+      SPLIT is_source AT 'as' INTO TABLE DATA(lt_get_as).
+      SPLIT lt_get_as[ 2 ] AT ' ' INTO TABLE DATA(lt_projections).
       DATA(lv_projections) = lines( lt_projections ).
       lv_cds_name = lt_projections[ lv_projections ].
     ELSEIF is_source CS 'association'.
