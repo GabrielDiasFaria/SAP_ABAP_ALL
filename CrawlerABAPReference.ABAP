@@ -117,6 +117,21 @@ CLASS lcl_crawler IMPLEMENTATION.
     lv_object_name = CONV progname( cs_object-object ).
     READ REPORT lv_object_name INTO cs_object-source.
 
+    IF cs_object-source IS INITIAL.
+      " Buscamos pela Transação
+      SELECT SINGLE *
+        FROM tstc
+        WHERE tcode = @cs_object-object
+        INTO @DATA(ls_tcode).
+
+      IF ls_tcode IS NOT INITIAL.
+        cs_object-object = ls_tcode-pgmna.
+        lv_object_name = CONV progname( cs_object-object ).
+        READ REPORT lv_object_name INTO cs_object-source.
+      ENDIF.
+
+    ENDIF.
+
     DELETE cs_object-source WHERE table_line(1) = '*' OR table_line(1) = |"|.
 
     CREATE DATA cs_object-dependencies TYPE TABLE OF ty_dependency.
