@@ -10,6 +10,14 @@ PARAMETERS: p_clas TYPE progname.
 PARAMETERS: p_func TYPE progname.
 PARAMETERS: p_cds  TYPE progname.
 
+SELECTION-SCREEN SKIP 1.
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+  PARAMETERS: p_roles TYPE progname,
+              p_subst RADIOBUTTON GROUP r1 DEFAULT 'X',
+              p_valid RADIOBUTTON GROUP r1.
+SELECTION-SCREEN END OF BLOCK b1.
+
+SELECTION-SCREEN SKIP 1.
 PARAMETERS: ch_exp AS CHECKBOX.
 
 
@@ -35,6 +43,38 @@ TYPES: BEGIN OF ty_classes,
        END OF ty_classes,
        tt_classes TYPE TABLE OF ty_classes WITH DEFAULT KEY.
 
+TYPES:
+  BEGIN OF ty_subst,
+    field        TYPE string,
+    subst        TYPE string,
+    value        TYPE string,
+    source       TYPE w3_htmltab,
+    dependencies TYPE ty_dependency,
+  END OF ty_subst,
+  tt_subst TYPE STANDARD TABLE OF ty_subst WITH DEFAULT KEY,
+
+  BEGIN OF ty_valid,
+    exit         TYPE string,
+    msg          TYPE string,
+    source       TYPE w3_htmltab,
+    dependencies TYPE ty_dependency,
+  END OF ty_valid,
+  tt_valid TYPE STANDARD TABLE OF ty_valid WITH DEFAULT KEY,
+
+  BEGIN OF ty_stage,
+    stage      TYPE string,
+    condition  TYPE string,
+    validation TYPE string,
+    subst      TYPE REF TO data,
+    valid      TYPE REF TO data,
+  END OF ty_stage,
+  tt_stage TYPE STANDARD TABLE OF ty_stage WITH DEFAULT KEY,
+
+  BEGIN OF ty_roles,
+    type_role TYPE n LENGTH 1, " 1 - Substituição, 2 - Validação
+    role      TYPE string,
+    stages    TYPE REF TO data,
+  END OF ty_roles.
 
 CLASS lcl_crawler DEFINITION.
 
@@ -48,15 +88,18 @@ CLASS lcl_crawler DEFINITION.
 
     DATA: gt_classes TYPE tt_classes.
 
-    METHODS: constructor          IMPORTING iv_prog TYPE progname
-                                            iv_clas TYPE progname
-                                            iv_func TYPE progname
-                                            iv_cds  TYPE progname.
+    METHODS: constructor          IMPORTING iv_prog  TYPE progname
+                                            iv_clas  TYPE progname
+                                            iv_func  TYPE progname
+                                            iv_cds   TYPE progname
+                                            iv_roles TYPE progname.
+
     METHODS: start_crawler_prog        CHANGING  cs_object TYPE ty_dependency.
     METHODS: start_crawler_cds         CHANGING  cs_object TYPE ty_dependency.
     METHODS: start_crawler_class       CHANGING  cs_object TYPE ty_dependency.
     METHODS: start_crawler_full_class  CHANGING  cs_object TYPE ty_dependency.
     METHODS: start_crawler_funct       CHANGING  cs_object TYPE ty_dependency.
+    METHODS: start_crawler_roles       RETURNING VALUE(re_roles) TYPE ty_roles.
 
     METHODS: add_program  IMPORTING is_source TYPE w3_html
                           CHANGING  cs_object TYPE ty_dependency.
@@ -67,7 +110,16 @@ CLASS lcl_crawler DEFINITION.
     METHODS: add_cds      IMPORTING is_source TYPE w3_html
                           CHANGING  cs_object TYPE ty_dependency.
 
-    METHODS: display_dependencies.
+    METHODS: display_dependencies IMPORTING is_data TYPE data.
+
+    METHODS:
+      get_substitution_rules RETURNING VALUE(re_roles)  TYPE ty_roles,
+      get_validation_rules   RETURNING VALUE(re_roles)  TYPE ty_roles,
+      get_source_form        IMPORTING iv_exit          TYPE string
+                                       iv_report        TYPE progname
+                             RETURNING VALUE(re_source) TYPE w3_htmltab,
+      get_source_dependence  IMPORTING is_source       TYPE w3_htmltab
+                             RETURNING VALUE(re_depen) TYPE ty_dependency.
 
 ENDCLASS.
 
@@ -79,34 +131,42 @@ CLASS lcl_crawler IMPLEMENTATION.
     DATA ls_objects LIKE LINE OF gt_objects.
     " <<< Inicia o Objeto
 
-    " Se for um Programa
-    IF iv_prog IS NOT INITIAL.
-      ls_objects-object   = iv_prog.
-      ls_objects-obj_type = 'PROGRAM'.
-      start_crawler_prog( CHANGING cs_object = ls_objects ).
+    "Se for regra de substituição ou validação
+    IF iv_roles IS NOT INITIAL.
+      DATA(lt_roles) = start_crawler_roles( ).
+      display_dependencies( lt_roles ).
+    ELSE.
+
+      " Se for um Programa
+      IF iv_prog IS NOT INITIAL.
+        ls_objects-object   = iv_prog.
+        ls_objects-obj_type = 'PROGRAM'.
+        start_crawler_prog( CHANGING cs_object = ls_objects ).
+      ENDIF.
+
+      IF iv_clas IS NOT INITIAL AND ls_objects-source IS INITIAL.
+        ls_objects-object   = iv_clas.
+        ls_objects-obj_type = 'CLASS'.
+        start_crawler_full_class( CHANGING cs_object = ls_objects ).
+      ENDIF.
+
+      IF iv_func IS NOT INITIAL AND ls_objects-source IS INITIAL.
+        ls_objects-object   = iv_clas.
+        ls_objects-obj_type = 'FUNCTION'.
+        start_crawler_funct( CHANGING cs_object = ls_objects ).
+      ENDIF.
+
+      IF iv_cds IS NOT INITIAL AND ls_objects-source IS INITIAL.
+        ls_objects-object   = iv_cds.
+        ls_objects-obj_type = 'CDS'.
+        start_crawler_cds( CHANGING cs_object = ls_objects ).
+      ENDIF.
+
+      APPEND ls_objects TO gt_objects.
+
+      display_dependencies( gt_objects ).
+
     ENDIF.
-
-    IF iv_clas IS NOT INITIAL AND ls_objects-source IS INITIAL.
-      ls_objects-object   = iv_clas.
-      ls_objects-obj_type = 'CLASS'.
-      start_crawler_full_class( CHANGING cs_object = ls_objects ).
-    ENDIF.
-
-    IF iv_func IS NOT INITIAL AND ls_objects-source IS INITIAL.
-      ls_objects-object   = iv_clas.
-      ls_objects-obj_type = 'FUNCTION'.
-      start_crawler_funct( CHANGING cs_object = ls_objects ).
-    ENDIF.
-
-    IF iv_cds IS NOT INITIAL AND ls_objects-source IS INITIAL.
-      ls_objects-object   = iv_cds.
-      ls_objects-obj_type = 'CDS'.
-      start_crawler_cds( CHANGING cs_object = ls_objects ).
-    ENDIF.
-
-    APPEND ls_objects TO gt_objects.
-
-    display_dependencies( ).
 
   ENDMETHOD.
 
@@ -568,7 +628,7 @@ CLASS lcl_crawler IMPLEMENTATION.
 
     DATA lv_cds_name TYPE string.
 
-    IF is_source CS 'projection on' OR is_source CS 'select from'.
+    IF is_source CS 'projection on' OR is_source CS 'select from z'.
       SPLIT is_source AT 'as' INTO TABLE DATA(lt_get_as).
       SPLIT lt_get_as[ 2 ] AT ' ' INTO TABLE DATA(lt_projections).
       DATA(lv_projections) = lines( lt_projections ).
@@ -606,9 +666,241 @@ CLASS lcl_crawler IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD start_crawler_roles.
+
+    CASE abap_true.
+      WHEN p_subst.
+        re_roles = get_substitution_rules( ).
+      WHEN p_valid.
+        re_roles = get_validation_rules( ).
+      WHEN OTHERS.
+    ENDCASE.
+
+
+  ENDMETHOD.
+
+  METHOD get_substitution_rules.
+    DATA: ls_roles  TYPE ty_roles,
+          ls_stages TYPE ty_stage,
+          ls_subst  TYPE ty_subst.
+
+    FIELD-SYMBOLS: <fs_subst>  TYPE tt_subst,
+                   <fs_stages> TYPE tt_stage.
+
+    CASE abap_true.
+      WHEN p_subst.
+        SELECT SINGLE gb92~substid, gb31t~valeventxt
+          FROM gb92
+          INNER JOIN gb31
+          ON  gb92~boolclass = gb31~rclass
+          INNER JOIN gb31t
+          ON gb31~valuser = gb31t~valuser
+          AND gb31~valevent = gb31t~valevent
+          AND gb92~subsclass = gb31~wclass
+          AND gb31t~spras = @sy-langu
+          INTO @DATA(ls_92)
+          WHERE substid = @p_roles.
+
+        SELECT 921~substid, 921~subseqnr, 921~condid, 921t~substext, 901~boolexp
+          FROM gb921 AS 921
+          LEFT OUTER JOIN gb921t AS 921t
+          ON 921~substid = 921t~subsid
+          AND 921~subseqnr = 921t~subseqnr
+          LEFT OUTER JOIN gb901 AS 901
+          ON 921~condid = 901~boolid
+          INTO TABLE @DATA(lt_921)
+          WHERE substid = @p_roles.
+
+        IF sy-subrc IS INITIAL.
+          SELECT *
+            FROM gb922
+            INTO TABLE @DATA(lt_922)
+            FOR ALL ENTRIES IN @lt_921
+            WHERE substid = @lt_921-substid
+              AND subseqnr = @lt_921-subseqnr.
+        ENDIF.
+
+        re_roles-type_role = 1.
+        re_roles-role = | Regra: { ls_92-substid } - { ls_92-valeventxt } |.
+        CREATE DATA re_roles-stages TYPE STANDARD TABLE OF ty_stage.
+
+        LOOP AT lt_922 INTO DATA(ls_922).
+          CREATE DATA ls_stages-subst TYPE STANDARD TABLE OF ty_subst.
+
+          "Etapas
+          ls_stages-stage = | Etapa: { ls_922-subseqnr } - { lt_921[ substid = ls_922-substid ]-substext } | .
+
+          "Condições
+          LOOP AT lt_921 INTO DATA(ls_921) WHERE substid = ls_922-substid
+                                             AND subseqnr = ls_922-subseqnr
+                                             AND NOT boolexp IS INITIAL.
+            ls_stages-condition = | { ls_stages-condition }{ ls_921-boolexp } |.
+          ENDLOOP.
+
+          "Substituições
+          IF NOT ls_922-substab IS INITIAL.
+            ls_subst-field = | { ls_922-substab }-{ ls_922-subsfield } |.
+          ENDIF.
+
+          IF NOT ls_922-subsval IS INITIAL.
+            ls_subst-subst = 'Valor constante'.
+            ls_subst-value = ls_922-subsval.
+          ELSEIF NOT ls_922-exitsubst IS INITIAL.
+            ls_subst-subst = 'Exit'.
+            ls_subst-value = ls_922-exitsubst.
+            TRANSLATE ls_subst-value TO LOWER CASE.
+            ls_subst-source = get_source_form( EXPORTING iv_exit = ls_subst-value
+                                                         iv_report = 'ZFIRGGBS000' ).
+            ls_subst-dependencies = get_source_dependence( ls_subst-source ).
+
+          ELSE.
+            ls_subst-subst = 'Campo'.
+            ls_subst-value = | { ls_922-tabsubst }-{ ls_922-filedsub } |.
+          ENDIF.
+
+          ASSIGN ls_stages-subst->* TO <fs_subst>.
+          IF <fs_subst> IS ASSIGNED.
+            APPEND ls_subst TO <fs_subst>.
+            CLEAR ls_subst.
+          ENDIF.
+
+          ASSIGN re_roles-stages->* TO <fs_stages>.
+          IF <fs_stages> IS ASSIGNED.
+            APPEND ls_stages TO <fs_stages>.
+            CLEAR: ls_stages.
+          ENDIF.
+        ENDLOOP.
+      WHEN p_valid.
+      WHEN OTHERS.
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD get_validation_rules.
+    DATA: ls_roles    TYPE ty_roles,
+          ls_stages   TYPE ty_stage,
+          ls_valid    TYPE ty_valid,
+          ls_bapiret1 TYPE bapiret1.
+
+    DATA: l_msgno TYPE syst_msgno.
+
+    FIELD-SYMBOLS: <fs_valid>  TYPE tt_valid,
+                   <fs_stages> TYPE tt_stage.
+
+    SELECT SINGLE gb93~valid, gb93~msgid, gb31t~valeventxt
+      FROM gb93
+      INNER JOIN gb31
+      ON  gb93~boolclass = gb31~rclass
+      INNER JOIN gb31t
+      ON gb31~valuser = gb31t~valuser
+      AND gb31~valevent = gb31t~valevent
+      AND gb31t~spras = @sy-langu
+      INTO @DATA(ls_93)
+      WHERE valid = @p_roles.
+
+    IF sy-subrc IS INITIAL.
+      SELECT *
+        FROM gb931
+        INTO TABLE @DATA(lt_931)
+        WHERE valid = @ls_93-valid.
+
+      IF sy-subrc IS INITIAL.
+        SELECT *
+          FROM gb901
+          INTO TABLE @DATA(lt_cond)
+          FOR ALL ENTRIES IN @lt_931
+          WHERE boolid = @lt_931-condid.
+
+        SELECT *
+          FROM gb901
+          INTO TABLE @DATA(lt_valid)
+          FOR ALL ENTRIES IN @lt_931
+          WHERE boolid = @lt_931-checkid.
+      ENDIF.
+    ENDIF.
+
+    re_roles-type_role = 2.
+    re_roles-role = | Regra: { ls_93-valid } - { ls_93-valeventxt } |.
+    CREATE DATA re_roles-stages TYPE STANDARD TABLE OF ty_stage.
+
+    LOOP AT lt_931 INTO DATA(ls_931).
+      CREATE DATA ls_stages-valid TYPE STANDARD TABLE OF ty_valid.
+
+      "Etapas
+      ls_stages-stage = | Etapa: { ls_931-valseqnr } | .
+
+      "Condições
+      LOOP AT lt_cond INTO DATA(ls_cond) WHERE boolid = ls_931-condid
+                                           AND NOT boolexp IS INITIAL.
+        ls_stages-condition = | { ls_stages-condition }{ ls_cond-boolexp } |.
+      ENDLOOP.
+
+      "Validação
+      "Condição de validação ou Exit
+      IF line_exists( lt_valid[ boolid = ls_931-checkid ] ).
+        IF lt_valid[ boolid = ls_931-checkid ]-boolexp+1(1) <> '='.
+          LOOP AT lt_valid INTO DATA(ls_valid2) WHERE boolid = ls_931-checkid
+                                                 AND NOT boolexp IS INITIAL.
+            ls_stages-validation = | { ls_stages-validation }{ ls_valid2-boolexp } |.
+          ENDLOOP.
+        ELSE.
+          ls_valid-exit = lt_valid[ boolid = ls_931-checkid ]-boolexp+2 .
+          TRANSLATE ls_valid-exit TO LOWER CASE.
+          ls_valid-source = get_source_form( EXPORTING iv_exit = ls_valid-exit
+                                                       iv_report = 'ZFIRGGBR000' ).
+          ls_valid-dependencies = get_source_dependence( ls_valid-source ).
+        ENDIF.
+      ENDIF.
+
+      "Mensagem
+      IF NOT ls_931-valmsg IS INITIAL  .
+
+        IF NOT ls_931-msgtab1 IS INITIAL.
+          DATA(l_var1) = CONV syst_msgv( | < { ls_931-msgtab1 } - { ls_931-msgfield1 } > | ).
+        ENDIF.
+        IF NOT ls_931-msgtab2 IS INITIAL.
+          DATA(l_var2) = CONV syst_msgv( | < { ls_931-msgtab2 } - { ls_931-msgfield2 } > | ).
+        ENDIF.
+        IF NOT ls_931-msgtab3 IS INITIAL.
+          DATA(l_var3) = CONV syst_msgv( | < { ls_931-msgtab3 } - { ls_931-msgfield3 } > | ).
+        ENDIF.
+        IF NOT ls_931-msgtab4 IS INITIAL.
+          DATA(l_var4) = CONV syst_msgv( | < { ls_931-msgtab4 } - { ls_931-msgfield4 } > | ).
+        ENDIF.
+
+        l_msgno = ls_931-valmsg.
+        CALL FUNCTION 'BALW_BAPIRETURN_GET1'
+          EXPORTING
+            type       = ls_931-valsevere
+            cl         = ls_93-msgid
+            number     = l_msgno
+            par1       = l_var1
+            par2       = l_var2
+            par3       = l_var3
+            par4       = l_var4
+          IMPORTING
+            bapireturn = ls_bapiret1.
+
+        ls_valid-msg = ls_bapiret1-message.
+      ENDIF.
+
+      ASSIGN ls_stages-valid->* TO <fs_valid>.
+      IF <fs_valid> IS ASSIGNED.
+        APPEND ls_valid TO <fs_valid>.
+        CLEAR ls_valid.
+      ENDIF.
+
+      ASSIGN re_roles-stages->* TO <fs_stages>.
+      IF <fs_stages> IS ASSIGNED.
+        APPEND ls_stages TO <fs_stages>.
+        CLEAR: ls_stages.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD display_dependencies.
 
-    DATA(lv_json) = /ui2/cl_json=>serialize( gt_objects ).
+    DATA(lv_json) = /ui2/cl_json=>serialize( is_data ).
 
     CALL TRANSFORMATION sjson2html SOURCE XML lv_json
                                RESULT XML DATA(html).
@@ -870,6 +1162,68 @@ CLASS lcl_crawler IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD get_source_form.
+    DATA: lt_source TYPE w3_htmltab.
+
+    DATA(l_exit) = |FORM { iv_exit }|.
+    READ REPORT iv_report INTO lt_source.
+
+    DELETE lt_source WHERE table_line(1) = '*' OR table_line(1) = |"|.
+
+    FIND l_exit IN TABLE lt_source MATCH LINE DATA(l_line).
+    IF sy-subrc IS INITIAL.
+      DO.
+        APPEND lt_source[ l_line ] TO re_source.
+
+        FIND 'ENDFORM' IN lt_source[ l_line ].
+        IF sy-subrc IS INITIAL.
+          EXIT.
+        ENDIF.
+
+        ADD 1 TO l_line.
+      ENDDO.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD get_source_dependence.
+    DATA: ls_dependency TYPE ty_dependency.
+
+    DATA(lt_source) = is_source.
+
+    DELETE lt_source WHERE table_line(1) = '*' OR table_line(1) = |"|.
+
+    CREATE DATA ls_dependency-dependencies TYPE TABLE OF ty_dependency.
+    "<<< Inicia o Objeto
+
+    LOOP AT lt_source INTO DATA(ls_source).
+
+      CHECK ls_source IS NOT INITIAL.
+      CONDENSE ls_source.
+      CHECK ls_source(1) NE '*' AND ls_source(1) NE '"'.
+
+      " Se Tiver Classes Adiciona
+      add_program( EXPORTING is_source = ls_source
+                   CHANGING  cs_object = ls_dependency ).
+
+      " Se Tiver Programas Adiciona
+      add_class( EXPORTING is_source = ls_source
+                 CHANGING  cs_object = ls_dependency ).
+
+      " Se Tiver Funções Adiciona
+      add_function( EXPORTING is_source = ls_source
+                    CHANGING  cs_object = ls_dependency ).
+
+      ASSIGN ls_dependency-dependencies->* TO <fs_dependencies>.
+      SORT <fs_dependencies>.
+      DELETE ADJACENT DUPLICATES FROM <fs_dependencies>.
+
+      IF <fs_dependencies> IS ASSIGNED AND NOT <fs_dependencies> IS INITIAL.
+        re_depen = <fs_dependencies>[ 1 ].
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
 ENDCLASS.
 
 
@@ -878,10 +1232,14 @@ INITIALIZATION.
   %_p_clas_%_app_%-text = 'Classe: '.
   %_p_func_%_app_%-text = 'Função: '.
   %_p_cds_%_app_%-text  = 'CDS: '.
+  %_p_roles_%_app_%-text  = 'Regra: '.
+  %_p_subst_%_app_%-text  = 'Substituição: '.
+  %_p_valid_%_app_%-text  = 'Validação: '.
   %_ch_exp_%_app_%-text = 'Exportar? '.
 
 START-OF-SELECTION.
   NEW lcl_crawler( iv_prog = p_prog
                    iv_clas = p_clas
                    iv_func = p_func
-                   iv_cds  = p_cds ).
+                   iv_cds  = p_cds
+                   iv_roles = p_roles ).
