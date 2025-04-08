@@ -48,6 +48,7 @@ TYPE-POOLS: seoc,
 
 TYPES: BEGIN OF ty_dependency,
          object           TYPE string,
+         obj_description  TYPE string,
          obj_type         TYPE string,
          obj_method       TYPE string,
          source           TYPE w3_htmltab,
@@ -299,6 +300,11 @@ CLASS lcl_crawler IMPLEMENTATION.
 
     ENDIF.
 
+    SELECT SINGLE text
+      FROM trdirt
+      WHERE name = @cs_object-object
+      INTO @cs_object-obj_description.
+
     DELETE cs_object-source WHERE table_line(1) = '*' OR table_line(1) = |"|.
     DELETE cs_object-source WHERE table_line = ''.
 
@@ -377,6 +383,17 @@ CLASS lcl_crawler IMPLEMENTATION.
     IF lt_source IS INITIAL.
       RETURN.
     ENDIF.
+
+    DATA(ls_clskey) = VALUE seoclskey( clsname = cs_object-object ).
+    DATA ls_class TYPE seoc_class_r.
+    CALL FUNCTION 'SEO_CLASS_READ'
+      EXPORTING
+        clskey          = ls_clskey
+        master_language = sy-langu
+      IMPORTING
+        class           = ls_class.
+
+    cs_object-obj_description = ls_class-descript.
 
     cs_object-source = lt_source.
 
@@ -546,6 +563,17 @@ CLASS lcl_crawler IMPLEMENTATION.
     DELETE cs_object-source WHERE table_line(1) = '*' OR table_line(1) = |"|.
     DELETE cs_object-source WHERE table_line = ''.
 
+    DATA(ls_clskey) = VALUE seoclskey( clsname = cs_object-object ).
+    DATA ls_class TYPE seoc_class_r.
+    CALL FUNCTION 'SEO_CLASS_READ'
+      EXPORTING
+        clskey          = ls_clskey
+        master_language = sy-langu
+      IMPORTING
+        class           = ls_class.
+
+    cs_object-obj_description = ls_class-descript.
+
     LOOP AT cs_object-source INTO DATA(ls_source).
 
       CHECK ls_source IS NOT INITIAL.
@@ -641,6 +669,11 @@ CLASS lcl_crawler IMPLEMENTATION.
     APPEND LINES OF lt_source_new TO cs_object-source.
     APPEND LINES OF lt_source TO cs_object-source.
 
+    SELECT SINGLE stext
+      FROM tftit
+      WHERE funcname = @cs_object-object
+      INTO @cs_object-obj_description.
+
     DELETE cs_object-source WHERE table_line(1) = '*' OR table_line(1) = |"|.
     DELETE cs_object-source WHERE table_line = ''.
 
@@ -687,9 +720,12 @@ CLASS lcl_crawler IMPLEMENTATION.
            ddddlsrc~source,
            ddddlsrct~ddtext
       FROM ddddlsrc
-      JOIN ddddlsrct ON ddddlsrc~ddlname = ddddlsrct~ddlname
+      JOIN ddddlsrct ON ddddlsrc~ddlname     = ddddlsrct~ddlname
+                    AND ddddlsrct~ddlanguage = @sy-langu
       WHERE ddddlsrc~ddlname = @cs_object-object
       INTO @DATA(ls_cds).
+
+      cs_object-obj_description = ls_cds-ddtext.
 
       SPLIT ls_cds-source AT cl_abap_char_utilities=>cr_lf INTO TABLE cs_object-source.
       DELETE cs_object-source WHERE table_line CS '/*'.
