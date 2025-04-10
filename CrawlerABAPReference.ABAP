@@ -378,6 +378,28 @@ CLASS lcl_crawler IMPLEMENTATION.
           inactive_deleted              = 5
           OTHERS                        = 6.
 
+      IF sy-subrc NE 0 OR lt_source IS INITIAL.
+        SELECT SINGLE *
+          FROM seometarel
+          WHERE clsname = @cs_object-object
+            AND reltype = '2'
+          INTO @DATA(ls_gratesuperclass).
+
+        CALL FUNCTION 'SEO_METHOD_GET_SOURCE'
+          EXPORTING
+            mtdkey                        = VALUE seocpdkey( clsname = ls_gratesuperclass-refclsname cpdname = cs_object-obj_method )
+          IMPORTING
+            source                        = lt_source
+          EXCEPTIONS
+            _internal_method_not_existing = 1
+            _internal_class_not_existing  = 2
+            version_not_existing          = 3
+            inactive_new                  = 4
+            inactive_deleted              = 5
+            OTHERS                        = 6.
+
+      ENDIF.
+
     ENDIF.
 
     IF lt_source IS INITIAL.
